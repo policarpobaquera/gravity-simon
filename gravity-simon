@@ -1,0 +1,429 @@
+/*///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////// GRAVITY SIMON /////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+
+Created Oct 16th 2021
+by Policarpo Baquera
+Carnegie Mellon University                                                     
+More info at: create.arduino.cc/projecthub/plcrpbqr/gravity-simon-game-df5d00  */
+
+
+///////////////////////////////// ADXL335 SETUP /////////////////////////////////
+#include "Arduino.h"
+#include <math.h>
+const byte pinX = A7;
+const byte pinY = A6;
+const int xMinVal = 289; const int yMinVal = 279; //const int zMinVal = 291;
+const int xMaxVal = 424; const int yMaxVal = 416; //const int zMaxVal = 424;
+int angle = 0;
+
+/////////////////////////////////// BUTTON ///////////////////////////////////////
+const byte pinButton = 13;
+
+// Struct to track and debounce the state of a push button switch
+typedef struct buttonTracker {
+  int  lastReading;       // last raw value read
+  long lastChangeTime;    // last time the raw value changed
+  byte pin;               // the pin this is tracking changes on
+  byte buttonState;       // debounced state of the button
+} butt;
+
+butt b;
+
+///////////////////////////////////// SPEAKER ///////////////////////////////////
+#include"pitches.h"
+const byte pinSpeaker = 10;
+const int SCALE[8] = {NOTE_C3, NOTE_D3, NOTE_E3, NOTE_F3, NOTE_G3, NOTE_A3, NOTE_B3, NOTE_C4};
+const int readyMelody[4]   = {NOTE_C3, NOTE_C3, NOTE_C3, NOTE_C4};
+const int correctMelody[2] = {NOTE_B3, NOTE_C4};
+const int wrongMelody[4]   = {NOTE_D3, NOTE_CS3};
+
+///////////////////////////////////// DISPLAY ///////////////////////////////////
+// LED Matrix pin values
+const byte pin01 = 6;
+const byte pin02 = 7;
+const byte pin03 = 8;
+const byte pin04 = 9;
+const byte pin05 = 2;
+const byte pin06 = 3;
+const byte pin07 = 4;
+const byte pin08 = 5;
+const byte pin09 = A0;
+const byte pin10 = A1;
+const byte pin11 = A2;
+const byte pin12 = A3;
+const byte pin13 = 12;
+const byte pin14 = 11;
+const byte pin15 = A4;
+const byte pin16 = A5;
+
+//Define cols and rows pin values for LED Matrix
+#define SIZE 8
+const byte COLS[8] = {pin05, pin02, pin07, pin01, pin12, pin08, pin14, pin09};
+const byte ROWS[8] = {pin13, pin03, pin04, pin10, pin06, pin11, pin15, pin16};
+      byte CROW    =  0;
+
+// Struct for animation frames
+typedef struct {
+  byte *p;       // Hex Pattern
+  int t;         // Animation time
+} pattern;
+
+// Patterns
+byte ARRp[8]     = {0x18, 0x3C, 0x7E, 0xDB, 0x18, 0x18, 0x18, 0x18};
+byte GOp[8]      = {0x00, 0x66, 0x99, 0xB9, 0x89, 0x99, 0x66, 0x00};
+byte THREEp[8]   = {0x00, 0x38, 0x04, 0x04, 0x38, 0x04, 0x38, 0x00};
+byte TWOp[8]     = {0x00, 0x3C, 0x10, 0x08, 0x04, 0x24, 0x18, 0x00};
+byte ONEp[8]     = {0x00, 0x08, 0x08, 0x08, 0x28, 0x18, 0x08, 0x00};
+byte CORRECTp[8] = {0x00, 0x00, 0x10, 0x28, 0x44, 0x02, 0x00, 0x00};
+byte WRONGp[8]   = {0x00, 0x42, 0x24, 0x18, 0x18, 0x24, 0x42, 0x00};
+byte C1p[8]      = {0xFF, 0xFF, 0xFF, 0x81, 0x81, 0x81, 0x81, 0xFF};
+byte D1p[8]      = {0xFF, 0x8F, 0x87, 0x83, 0x81, 0x81, 0x81, 0xFF};
+byte E1p[8]      = {0xFF, 0x87, 0x87, 0x87, 0x87, 0x87, 0x87, 0xFF};
+byte F1p[8]      = {0xFF, 0x81, 0x81, 0x81, 0x83, 0x87, 0x8F, 0xFF};
+byte G1p[8]      = {0xFF, 0x81, 0x81, 0x81, 0x81, 0xFF, 0xFF, 0xFF};
+byte A1p[8]      = {0xFF, 0x81, 0x81, 0x81, 0xC1, 0xE1, 0xF1, 0xFF};
+byte B1p[8]      = {0xFF, 0xE1, 0xE1, 0xE1, 0xE1, 0xE1, 0xE1, 0xFF};
+byte C2p[8]      = {0xFF, 0xF1, 0xE1, 0xC1, 0x81, 0x81, 0x81, 0xFF};
+
+// Frames and animations
+pattern ARR1;        // ARROW 0.8s frame 
+pattern ARR2;        // ARROW 0.2s frame 
+pattern ARR[2];      // ARROW 1.0s animation
+pattern GO;          // GO    1s frame
+pattern THREE;       // THREE 1s frame 
+pattern TWO;         // TWO   1s frame 
+pattern ONE;         // ONE   1s frame 
+pattern COUNT[4];    // COUNT 4s animation
+pattern CORRECT;     // CORRECT 2s frame 
+pattern WRONG;       // WRONG   2s frame 
+pattern noteC1;
+pattern noteD1;
+pattern noteE1;
+pattern noteF1;
+pattern noteG1;
+pattern noteA1;
+pattern noteB1;
+pattern noteC2; 
+pattern NOTES[8];
+
+////////////////////////////////////// GAME /////////////////////////////////////
+// Game state
+enum modes{introMode, readyMode, melodyMode, gameMode, resultMode};
+enum modes state;
+byte currentMelody;
+int  currentNote;
+
+// Game rounds
+typedef struct{
+  byte *notes;
+  int *duration;
+  int len;
+} game;
+
+game game1;
+game game2;
+game game3;
+game game4;
+game gameCollection[4];
+
+// Game melodies
+byte notes1[4] = {   0,    0,    4,    2};
+int  durat1[4] = {1000, 1000, 1000, 1000};
+byte notes2[5] = {   4,    1,    2,    5,    4};
+int  durat2[5] = {1500,  500, 1000, 1000, 2000};
+byte notes3[7] = {   1,    3,    1,    2,    0,    4,    7};
+int  durat3[7] = { 800,  800,  800,  800,  800,  800,  800};
+byte notes4[9] = {   0,    7,    6,    5,    4,    1,    2,    3,    4};
+int  durat4[9] = {1000, 1000, 1500,  500,  500,  500,  500,  500, 1000};
+
+// Player status
+typedef struct playerTracker {
+  byte lastReading;      // last raw value read
+  long lastChangeTime;   // last time the raw value changed
+  byte state;            // debounced state of the button
+  bool success;
+} player;
+
+player p;
+
+////////////////////////////////////// SETUP ////////////////////////////////////
+void setup() {
+  // Button
+  initButton(b, pinButton);
+  // Accelerometer
+  pinMode(pinX, INPUT);
+  pinMode(pinY, INPUT);
+  // Matrix setup and patterns
+  initMatrix();
+  initPatterns();
+  initGame(p);
+}
+
+void initButton(butt &button, int pinButton) {  
+  pinMode(pinButton, INPUT);
+  button.lastReading = digitalRead(pinButton);
+  button.lastChangeTime = millis();
+  button.pin = pinButton;
+  button.buttonState = button.lastReading;
+}
+
+void initMatrix() {
+  for(int i = 0; i < 8; i++) {
+    pinMode(COLS[i], OUTPUT);
+    pinMode(ROWS[i], OUTPUT);
+  }
+  for(int i = 0; i < SIZE; i++) {
+    digitalWrite(COLS[i], LOW);
+  }
+  for(int i = 0; i < 8; i++) {
+    digitalWrite(ROWS[i], HIGH);
+  }
+}
+
+void initPatterns() {
+  ARR1.p = ARRp; ARR1.t = 1000;
+  ARR2.p = ARRp; ARR2.t = 500;
+  ARR[0] = ARR1; ARR[1] = ARR2;
+  GO.p = GOp; GO.t = 1000;
+  THREE.p = THREEp; THREE.t = 1000;
+  TWO.p = TWOp; TWO.t = 1000;
+  ONE.p = ONEp; ONE.t = 1000;
+  COUNT[0] = THREE; COUNT[1] = TWO; COUNT[2] = ONE; COUNT[3] = GO;
+  CORRECT.p = CORRECTp; CORRECT.t = 2000;
+  WRONG.p = WRONGp; WRONG.t = 2000;
+  noteC1.p = C1p;
+  noteD1.p = D1p;
+  noteE1.p = E1p;
+  noteF1.p = F1p;
+  noteG1.p = G1p;
+  noteA1.p = A1p;
+  noteB1.p = B1p;
+  noteC2.p = C2p;
+  NOTES[0] = noteC1; NOTES[1] = noteD1; NOTES[2] = noteE1; NOTES[3] = noteF1;
+  NOTES[4] = noteG1; NOTES[5] = noteA1; NOTES[6] = noteB1; NOTES[7] = noteC2;
+}
+
+void initGame(player &pl) {
+  // Initialize the game
+  state = introMode;
+  currentMelody = 0;
+  currentNote = 0;
+  // Initialize player's status
+  pl.lastReading = 0;
+  pl.lastChangeTime = millis();
+  pl.state = pl.lastReading; 
+  pl.success = false;       // false means the user has failed, true means he has succeed
+  // Initialize game rounds and assign melodies
+  game1.notes = notes1; game1.duration = durat1; game1.len = 4;
+  game2.notes = notes2; game2.duration = durat2; game2.len = 5;
+  game3.notes = notes3; game3.duration = durat3; game3.len = 7;
+  game4.notes = notes4; game4.duration = durat4; game4.len = 9;
+  gameCollection[0] = game1; 
+  gameCollection[1] = game2;
+  gameCollection[2] = game3;
+  gameCollection[3] = game4;
+}
+
+/* ///////////////////////////////////////// LOOP ///////////////////////////////////////// */
+void loop() {
+  if (state == introMode){
+    introScreen();
+    if (buttonPressed(b) == true) state = readyMode;
+  }
+  if (state == readyMode) {
+    readyScreen();
+    state = melodyMode;
+  }
+  if (state == melodyMode) {
+    melodyScreen();
+    state = gameMode;
+  }
+  if (state == gameMode) {
+    gameScreen();
+  }
+  if (state == resultMode) {
+    resultScreen();
+    state = readyMode;
+  }
+}
+
+void introScreen() {
+  for (byte i = 0; i < 2; i++){
+    unsigned long startTime = millis();
+    while(ARR[i].t > ((millis() - startTime))) {
+      if (i == 0) lightRow(ARR[i].p[CROW]);
+      else lightRowDim(ARR[i].p[CROW]);
+    }
+  }
+}
+
+void readyScreen() {
+  for (byte i = 0; i < 4; i++){
+    tone(pinSpeaker, readyMelody[i]);
+    unsigned long startTime = millis();
+    while(COUNT[i].t > ((millis() - startTime))) {
+      if ((COUNT[i].t - 400) < ((millis() - startTime))) noTone(pinSpeaker);
+      lightRow(COUNT[i].p[CROW]);
+    }
+  }
+}
+
+void melodyScreen() {
+  int   lenM       = gameCollection[currentMelody].len;
+  byte* notesM     = gameCollection[currentMelody].notes;
+  int*  durationM  = gameCollection[currentMelody].duration;
+  for (byte i = 0; i < lenM; i++){
+    tone(pinSpeaker, SCALE[notesM[i]]);
+    unsigned long startTime = millis();
+    while(durationM[i] > ((millis() - startTime))) {
+      if ((durationM[i]- 100) < ((millis() - startTime))) noTone(pinSpeaker);
+      lightRow(NOTES[notesM[i]].p[CROW]);
+    }
+  }
+}
+
+void gameScreen() {
+  readAccel();
+  readPos(p);
+  if (buttonPressed(b) == false) {
+    noTone(pinSpeaker);
+    for (int i = 0; i < 8; i++){
+      lightRowDim(NOTES[p.state].p[CROW]);  
+    }
+  } else checkGame();
+}
+
+void resultScreen() {
+  for (byte i = 0; i < 2; i++){
+    unsigned long startTime = millis();
+    if (p.success) {
+      tone(pinSpeaker, correctMelody[i]);
+      while(500 > ((millis() - startTime))) {
+        lightRow(CORRECT.p[CROW]);
+      }
+    } else {
+      tone(pinSpeaker, wrongMelody[i]);
+      while(500 > ((millis() - startTime))) {
+        lightRow(WRONG.p[CROW]);
+      }    
+    }
+  }
+  noTone(pinSpeaker);
+  delay(1000);
+}
+
+void checkGame(){
+  byte note = gameCollection[currentMelody].notes[currentNote];
+  if (p.state != note) {
+    p.success = false;
+    currentNote = 0;
+    state = resultMode;
+    delay(200);
+    noTone(pinSpeaker);  
+    delay(50);
+  } else if (p.state == note && currentNote == (gameCollection[currentMelody].len - 1)) {
+    p.success = true;
+    currentNote = 0;
+    currentMelody = (currentMelody + 1) % 4;
+    state = resultMode;
+    delay(200);
+    noTone(pinSpeaker);  
+    delay(50);
+  } else {
+    p.success = false;
+    currentNote++;
+  }
+  while (digitalRead(b.pin) == true) {
+    for (int i = 0; i < 8; i++){
+      lightRow(NOTES[p.state].p[CROW]);
+      tone(pinSpeaker, SCALE[p.state]);
+    }
+  }
+}
+
+bool buttonPressed(butt &button) { 
+  // Swith must stay stable this long (in msec) to register
+  const long debounceTime = 50;   
+  // Default to no change until we find out otherwise
+  boolean result = false; 
+  // Get the current raw reading from the switch
+  int reading = digitalRead(button.pin);
+  if (reading != button.lastReading) {
+    button.lastChangeTime = millis();
+    button.lastReading = reading;
+  }
+  if ((millis() - button.lastChangeTime) > debounceTime) {
+    button.buttonState = reading;
+    result = (button.buttonState == 1);
+  }
+  return result;
+}
+
+void readAccel() {
+  int xRead = 0, yRead = 0;
+  int  xAng = 0,  yAng = 0;
+  int sampleSize = 4;
+  for(int i = 0; i < sampleSize ; i++) {
+    xRead += analogRead(pinX);
+    yRead += analogRead(pinY);
+    //zRead += analogRead(pinZ);
+  }
+  xRead = xRead / sampleSize;
+  yRead = yRead / sampleSize;
+  //zRead = zRead / sampleSize;
+  xAng = map(xRead, xMinVal, xMaxVal, -90, 90);
+  yAng = map(yRead, yMinVal, yMaxVal, -90, 90);
+  //zAng = map(zRead, zMinVal, zMaxVal, -90, 90);
+  //x = RAD_TO_DEG * (atan2(-yAng, -zAng) + PI);
+  //y = RAD_TO_DEG * (atan2(-xAng, -zAng) + PI);
+  angle = RAD_TO_DEG * (atan2(-yAng, -xAng) + PI);
+  //Serial.print("angle = "); Serial.println(z);
+}
+
+void readPos(player &pl) {
+  // Player position must stay stable this long (in msec) to register
+  const long debounceTime = 20;
+  // Get the current raw reading from the accelerometer
+  byte reading = 0;
+  if (158 < angle && angle <= 203) reading = 0;
+  if (203 < angle && angle <= 248) reading = 1;
+  if (248 < angle && angle <= 293) reading = 2;
+  if (293 < angle && angle <= 338) reading = 3;
+  if (338 < angle || angle <=  23) reading = 4;
+  if ( 23 < angle && angle <=  68) reading = 5;
+  if ( 68 < angle && angle <= 113) reading = 6;
+  if (113 < angle && angle <= 158) reading = 7;
+  if (reading != pl.lastReading) {
+    pl.lastChangeTime = millis();
+    pl.lastReading = reading;
+  }
+  if ((millis() - pl.lastChangeTime) > debounceTime) {
+    pl.state = reading;
+  }
+}
+
+void lightRow(byte hex) {
+  digitalWrite(ROWS[CROW], LOW);
+  for(byte i = 0; i < 8; i++) {
+    digitalWrite(COLS[i], (hex>>i) & 0x01);
+  }
+  for(byte i = 0; i < 8; i++) {
+    digitalWrite(COLS[i], LOW);
+  }
+  digitalWrite(ROWS[CROW], HIGH);
+  CROW = (CROW + 1) % SIZE;
+}
+
+void lightRowDim(byte hex) {
+  digitalWrite(ROWS[CROW], LOW);
+  for(byte i = 0; i < 8; i++) {
+    digitalWrite(COLS[i], (hex>>i) & 0x01);
+  }
+  for(byte i = 0; i < 8; i++) {
+    digitalWrite(COLS[i], LOW);
+  }
+  digitalWrite(ROWS[CROW], HIGH);
+  delay(1);
+  CROW = (CROW + 1) % SIZE;
+}
